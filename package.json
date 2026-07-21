@@ -1,0 +1,27 @@
+{
+  "name": "newsletter-tech",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Capture d'articles web -> PDF mode lecture -> digest quotidien par email (sous 7 Mo)",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "process-queue": "node src/jobs/process-queue.js",
+    "send-digest": "node src/jobs/send-digest.js"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "jsdom": "^25.0.1",
+    "nanoid": "^5.0.7",
+    "node-cron": "^3.0.3",
+    "playwright": "1.48.0",
+    "resend": "^4.0.1",
+    "sharp": "^0.33.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
