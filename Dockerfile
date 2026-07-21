@@ -9,6 +9,11 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ghostscript \
   && rm -rf /var/lib/apt/lists/*
 
+# Chromium est déjà dans l'image de base : on empêche le paquet npm
+# "playwright" de le re-télécharger pendant npm ci (image plus légère,
+# build plus rapide, on reste loin de la limite 4 Go du plan Trial).
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY package*.json ./
 RUN npm ci --omit=dev
 
