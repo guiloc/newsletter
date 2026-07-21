@@ -79,4 +79,13 @@ Récupère le bookmarklet sur `http://localhost:3000/bookmarklet`.
 
 ## Bookmarklet
 
-Ouvre `/<BASE_URL>/bookmarklet` et suis les instructions (glisser dans la barre de favoris sur desktop, créer un favori manuellement sur mobile). Le token est inclus dans le lien : ne le partage pas, régénère-le en cas de fuite.
+Ouvre `https://TON-URL/bookmarklet?token=TON_TOKEN` (la page est **protégée par le token**, car elle l'affiche en clair) et suis les instructions : glisser le bouton dans la barre de favoris sur desktop, créer un favori manuellement sur mobile. Le token est inclus dans le lien du bookmarklet : ne le partage pas, régénère-le en cas de fuite.
+
+## Endpoints
+
+| Route | Rôle |
+|---|---|
+| `GET /health` | Sonde de santé (`{"ok":true}`) |
+| `GET /bookmarklet?token=…` | Page d'installation du bookmarklet (protégée) |
+| `GET\|POST /add?token=…&url=…&title=…` | Capture d'un article |
+| `GET\|POST /send-now?token=…` | Force l'envoi du digest immédiatement (sinon : cron quotidien) |

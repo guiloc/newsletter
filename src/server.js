@@ -36,9 +36,18 @@ ${autoClose ? '<script>setTimeout(function(){window.close()},1400)</script>' : '
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-app.get('/bookmarklet', (_req, res) =>
-  res.type('html').send(bookmarkletPage(config.baseUrl, config.captureToken))
-);
+// Page d'installation du bookmarklet — protégée par le token, car elle
+// affiche ce token en clair. Il faut donc déjà le connaître pour la voir :
+//   https://TON-URL/bookmarklet?token=XXX
+app.get('/bookmarklet', (req, res) => {
+  if (!tokenOk(req.query.token)) {
+    return res
+      .status(401)
+      .type('html')
+      .send(statusPage('⛔ Ajoute ?token=TON_TOKEN à l\'URL pour voir le bookmarklet.'));
+  }
+  res.type('html').send(bookmarkletPage(config.baseUrl, config.captureToken));
+});
 
 // Capture d'un article. Accepte GET (bookmarklet via window.open) et POST.
 async function handleAdd(req, res) {
@@ -67,6 +76,33 @@ async function handleAdd(req, res) {
 
 app.get('/add', handleAdd);
 app.post('/add', handleAdd);
+
+// Force l'envoi du digest immédiatement, sans attendre le cron.
+//   https://TON-URL/send-now?token=XXX
+// Verrou pour éviter deux envois simultanés (le rendu des PDF prend du temps).
+let digestRunning = false;
+async function handleSendNow(req, res) {
+  const token = req.query.token ?? req.body?.token;
+  if (!tokenOk(token)) return res.status(401).send(statusPage('⛔ Token invalide'));
+  if (digestRunning) return res.send(statusPage('⏳ Un envoi est déjà en cours…'));
+
+  digestRunning = true;
+  try {
+    const result = await runDigest();
+    const msg = result.sent
+      ? `✓ Envoyé : ${result.attachments} PDF, ${result.links} lien(s) — ${result.size}`
+      : `Rien à envoyer (${result.reason})`;
+    res.send(statusPage(msg));
+  } catch (err) {
+    console.error('send-now:', err);
+    res.status(500).send(statusPage(`⛔ Échec de l'envoi : ${err.message}`));
+  } finally {
+    digestRunning = false;
+  }
+}
+
+app.get('/send-now', handleSendNow);
+app.post('/send-now', handleSendNow);
 
 app.listen(config.port, () => {
   console.log(`newsletter-tech en écoute sur le port ${config.port}`);
