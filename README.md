@@ -20,8 +20,9 @@ Navigateur ──(bookmarklet + token)──▶ /add ──▶ file (volume) ─
 
 | Fichier | Rôle |
 |---|---|
-| `src/server.js` | Serveur HTTP (endpoint `/add`, `/bookmarklet`, `/health`) + cron in-process |
-| `src/extract.js` | Chargement Chromium + Readability + inline/compression des images |
+| `src/server.js` | Serveur HTTP (endpoints `/add`, `/send-now`, `/bookmarklet`, `/health`) + cron in-process |
+| `src/browser.js` | Instance Chromium unique et partagée (empreinte anti-bot) |
+| `src/extract.js` | Chromium + Readability + repli RSS + inline/compression des images |
 | `src/template.js` | Gabarit HTML imprimable (typographie mode lecture) |
 | `src/pdf.js` | Rendu PDF (Playwright) + recompression Ghostscript |
 | `src/digest.js` | Assemblage sous budget avec l'échelle de dégradation |
@@ -39,6 +40,17 @@ Le digest tient dans **un seul mail** ; on ne dépasse jamais 7 Mo. Le budget de
 4. **Lien seul** dans le mail (pas de pièce jointe), les plus lourds d'abord.
 
 Garanties : le mail **part toujours**, et **aucun article n'est perdu** (au pire il devient un lien).
+
+## Robustesse de l'extraction
+
+Deux couches, dans `src/extract.js` :
+
+1. **Empreinte navigateur crédible** — certains sites (Substack & tout ce qui est derrière Cloudflare) renvoient un **403** aux navigateurs headless, surtout depuis une **IP de datacenter** comme Railway. On atténue ça avec une UA Chrome complète, les *client hints* `sec-ch-ua`, une locale/fuseau cohérents et le masquage de `navigator.webdriver` (`--disable-blink-features=AutomationControlled`).
+2. **Repli sur le flux RSS** — si la voie navigateur échoue quand même, on récupère l'article dans `{site}/feed` (Substack et beaucoup de flux publient l'article **complet** dans `<content:encoded>`, et un flux RSS n'est pas protégé par Cloudflare). On retrouve l'article par son URL.
+
+**Garde-fous** : une réponse HTTP ≥ 400 ou une page quasi vide / intitulée « Error… » est **rejetée** (article marqué en erreur, pas envoyé) — on ne fabrique jamais un PDF à partir d'une page d'erreur.
+
+**Limites** : le repli RSS ne couvre que les articles **récents** (les ~20 derniers du flux) et les sites qui exposent un flux à **contenu complet**. Un site bloqué par Cloudflare *sans* flux RSS complet ne passera pas (il faudrait alors un service de lecture tiers).
 
 ## Développement local
 
