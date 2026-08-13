@@ -58,10 +58,9 @@ async function inlineImage(absUrl) {
   }
 }
 
-// Charge la page dans Chromium, extrait l'article en « mode lecture »
-// (Readability). En secours, si l'extraction échoue, on retombe sur le
-// <body> nettoyé de la page rendue.
-export async function extractArticle(url) {
+// Charge la page dans Chromium et extrait l'article en « mode lecture »
+// (Readability). Lève une exception si la page est bloquée/vide (garde-fous).
+async function extractViaBrowser(url) {
   const browser = await getBrowser();
   const context = await browser.newContext(CONTEXT_OPTIONS);
   const page = await context.newPage();
@@ -107,7 +106,62 @@ export async function extractArticle(url) {
     await context.close();
   }
 
-  // Nettoyage commun + inline des images sur le HTML retenu.
+  return { title, byline, sourceHtml };
+}
+
+// Repli : de nombreux flux RSS (Substack en tête) publient l'article COMPLET
+// dans <content:encoded>, et un flux n'est pas protégé par Cloudflare. Quand
+// l'extraction navigateur échoue (403 depuis une IP datacenter, page bloquée),
+// on récupère l'article via le flux `{site}/feed` en le retrouvant par son URL.
+const normalizeUrl = (u) => u.replace(/[#?].*$/, '').replace(/\/+$/, '');
+
+export async function extractViaFeed(url) {
+  const origin = new URL(url).origin;
+  const res = await fetch(`${origin}/feed`, {
+    headers: { 'User-Agent': UA, Accept: 'application/rss+xml, application/xml, text/xml' },
+  });
+  if (!res.ok) return null;
+  const xml = await res.text();
+
+  const items = xml.split('<item>').slice(1).map((s) => s.split('</item>')[0]);
+  for (const item of items) {
+    const link = item.match(/<link>([\s\S]*?)<\/link>/)?.[1]?.trim();
+    if (!link || normalizeUrl(link) !== normalizeUrl(url)) continue;
+
+    const encoded = item.match(
+      /<content:encoded>\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*<\/content:encoded>/
+    )?.[1];
+    if (!encoded) return null;
+
+    const text = encoded.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (text.length < 250) return null;
+
+    const rawTitle = item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+    const title = rawTitle.replace(/^<!\[CDATA\[/, '').replace(/\]\]>$/, '').trim() || url;
+    return { title, byline: '', sourceHtml: encoded };
+  }
+  return null;
+}
+
+// Point d'entrée : voie navigateur d'abord, repli RSS si elle échoue.
+export async function extractArticle(url) {
+  let title;
+  let byline;
+  let sourceHtml;
+
+  try {
+    ({ title, byline, sourceHtml } = await extractViaBrowser(url));
+  } catch (err) {
+    const viaFeed = await extractViaFeed(url).catch(() => null);
+    if (!viaFeed) throw err; // ni navigateur ni RSS : on remonte l'erreur d'origine
+    ({ title, byline, sourceHtml } = viaFeed);
+  }
+
+  return finalizeContent({ url, title, byline, sourceHtml });
+}
+
+// Nettoyage commun + inline des images, quelle que soit la source du HTML.
+async function finalizeContent({ url, title, byline, sourceHtml }) {
   const dom = new JSDOM(`<body>${sourceHtml}</body>`, { url });
   const doc = dom.window.document;
   doc
