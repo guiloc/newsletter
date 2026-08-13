@@ -7,8 +7,14 @@ let browserPromise = null;
 export function getBrowser() {
   if (!browserPromise) {
     browserPromise = chromium.launch({
-      // --no-sandbox est nécessaire dans le conteneur Railway.
-      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+      args: [
+        // --no-sandbox est nécessaire dans le conteneur Railway.
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        // Retire navigator.webdriver=true, signal de bot n°1 (ex. Substack
+        // renvoie un 403 « Error - Substack » aux navigateurs headless).
+        '--disable-blink-features=AutomationControlled',
+      ],
     });
   }
   return browserPromise;

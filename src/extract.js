@@ -6,7 +6,28 @@ import { config } from './config.js';
 
 const UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
-  '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+  '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+// Options de contexte qui font ressembler la requête à un vrai Chrome plutôt
+// qu'à un navigateur headless : UA complète + client hints `sec-ch-ua` (qu'un
+// Chrome envoie toujours et dont l'absence trahit un bot), locale et fuseau
+// cohérents. Indispensable pour passer les protections type Cloudflare qui
+// sont plus strictes depuis une IP de datacenter (Railway).
+const CONTEXT_OPTIONS = {
+  userAgent: UA,
+  locale: 'fr-FR',
+  timezoneId: 'Europe/Paris',
+  viewport: { width: 1280, height: 800 },
+  extraHTTPHeaders: {
+    'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Upgrade-Insecure-Requests': '1',
+    'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+  },
+};
 
 // Télécharge une image, la redimensionne / recompresse, et renvoie une
 // data URI autonome. C'est le premier levier de contrôle de la taille :
@@ -42,7 +63,7 @@ async function inlineImage(absUrl) {
 // <body> nettoyé de la page rendue.
 export async function extractArticle(url) {
   const browser = await getBrowser();
-  const context = await browser.newContext({ userAgent: UA });
+  const context = await browser.newContext(CONTEXT_OPTIONS);
   const page = await context.newPage();
 
   let title = url;
@@ -50,7 +71,16 @@ export async function extractArticle(url) {
   let sourceHtml;
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
+    const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 45000 });
+
+    // Garde-fou n°1 : un statut d'erreur ne lève pas d'exception côté
+    // Playwright — on le fait nous-mêmes, sinon on fabriquerait un PDF à
+    // partir d'une page « 403 / 404 » (ex. « Error - Substack »).
+    const status = response ? response.status() : 0;
+    if (status >= 400) {
+      throw new Error(`HTTP ${status} (accès refusé ou page introuvable)`);
+    }
+
     const rawHtml = await page.content();
     const dom = new JSDOM(rawHtml, { url });
     const article = new Readability(dom.window.document).parse();
@@ -61,7 +91,16 @@ export async function extractArticle(url) {
       sourceHtml = article.content;
     } else {
       // Secours : le corps rendu de la page (nettoyé plus bas).
-      title = (await page.title()) || url;
+      const pageTitle = (await page.title()) || url;
+      const bodyText = await page.evaluate(() => (document.body.innerText || '').trim());
+
+      // Garde-fou n°2 : une page quasi vide ou intitulée « Error … » est
+      // presque sûrement un blocage/erreur — on refuse plutôt que d'envoyer
+      // un PDF poubelle (l'article sera marqué en erreur, pas envoyé).
+      if (bodyText.length < 250 || /^error\b/i.test(pageTitle)) {
+        throw new Error('contenu introuvable (page bloquée ou vide)');
+      }
+      title = pageTitle;
       sourceHtml = await page.evaluate(() => document.body.innerHTML);
     }
   } finally {
